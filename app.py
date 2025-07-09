@@ -79,12 +79,16 @@ with tab1:
         file_type = uploaded_file.type
 
         metadata = {}
+        image = None
+
+        # Show preview and extract metadata immediately
         if file_type.startswith("image"):
             image = Image.open(uploaded_file)
             uploaded_file.seek(0)
             st.image(uploaded_file, caption="Uploaded file preview", use_container_width=True)
             metadata = get_exif_metadata(image)
-        else:
+
+        elif file_type.startswith("video"):
             st.video(uploaded_file)
             temp_file_path = os.path.join(".", "temp_video")
             with open(temp_file_path, "wb") as f:
@@ -93,19 +97,18 @@ with tab1:
             metadata = get_video_metadata(temp_file_path)
             os.remove(temp_file_path)
 
+        # Show extracted metadata before hash is generated
         st.subheader("📄 Full Metadata Snapshot")
         st.json(metadata)
 
         if st.button("Generate Hash"):
-            if file_type.startswith("image"):
-                if hash_type == "Pixel Only":
-                    hash_value = calculate_pixel_hash(image)
-                else:
-                    hash_value = calculate_file_hash(uploaded_file)
+            if file_type.startswith("image") and hash_type == "Pixel Only" and image:
+                hash_value = calculate_pixel_hash(image)
             else:
                 hash_value = calculate_file_hash(uploaded_file)
 
             timestamp = datetime.utcnow().isoformat()
+
             st.success("Hash generated successfully.")
             st.code(hash_value, language="text")
 
