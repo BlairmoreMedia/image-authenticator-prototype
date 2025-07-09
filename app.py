@@ -8,6 +8,10 @@ import io
 import os
 import cv2
 import re
+import pillow_heif
+
+# Register HEIF opener so Pillow can open .heic files
+pillow_heif.register_heif_opener()
 
 st.set_page_config(page_title="Digital File Verifier", layout="centered")
 
@@ -79,7 +83,7 @@ def create_certificate(data_dict):
     return json_bytes
 
 with tab1:
-    uploaded_file = st.file_uploader("Upload an image or video file", type=["jpg", "jpeg", "png", "mp4", "mov"])
+    uploaded_file = st.file_uploader("Upload an image or video file", type=["jpg", "jpeg", "png", "tif", "tiff", "heic", "mp4", "mov"])
     hash_type = st.radio("Select hash method", list(HASH_OPTIONS.keys()))
     st.caption(HASH_OPTIONS[hash_type])
 
