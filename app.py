@@ -134,7 +134,7 @@ with tab1:
                 mime="application/json"
             )
 
-            if st.button("View Metadata"):
+            with st.expander("View Metadata"):
                 st.subheader("Full Metadata Snapshot")
                 for key, value in st.session_state.cert_data["metadata"].items():
                     display_key = re.sub(r'(?<!^)(?=[A-Z])', ' ', key).title()
