@@ -58,7 +58,7 @@ def hash_image_pixels(image_bytes):
         return f"Error: {str(e)}"
 
 # --- Streamlit App ---
-st.title("🧪 Blockchain Media Authenticator Prototype")
+st.title("Blockchain Media Authenticator Prototype")
 tabs = st.tabs(["🔐 Authenticate File", "🔍 Verify File"])
 
 # --- Tab 1: Authenticate ---
