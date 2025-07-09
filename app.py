@@ -1,160 +1,151 @@
 import streamlit as st
 import hashlib
-import datetime
+from datetime import datetime
 import json
-from PIL import Image
-from PIL.ExifTags import TAGS
-import io
-import cv2
-import tempfile
-import os
+from PIL import Image, ExifTags
 import numpy as np
+import io
+import os
+import cv2
 
-# --- Functions ---
-def extract_exif_metadata(image_bytes):
+st.set_page_config(page_title="Digital File Verifier", layout="centered")
+
+st.title("🧪 Digital File Authentication Prototype")
+st.markdown("Select a file to authenticate and generate a cryptographic hash.")
+
+tab1, tab2 = st.tabs(["🔐 Authenticate", "🔎 Verify"])
+
+HASH_OPTIONS = {
+    "File": "Creates a SHA-256 hash of the entire uploaded file, including any embedded metadata.",
+    "Pixel Only": "Creates a SHA-256 hash of only the image's raw pixel data. Ignores file metadata and format."
+}
+
+def calculate_file_hash(uploaded_file):
+    file_bytes = uploaded_file.read()
+    uploaded_file.seek(0)
+    return hashlib.sha256(file_bytes).hexdigest()
+
+def calculate_pixel_hash(image):
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    pixel_array = np.array(image)
+    pixel_bytes = pixel_array.tobytes()
+    return hashlib.sha256(pixel_bytes).hexdigest()
+
+def get_exif_metadata(image):
     metadata = {}
     try:
-        img = Image.open(io.BytesIO(image_bytes))
-        exif_data = img._getexif()
-        if exif_data is not None:
-            for tag_id, value in exif_data.items():
-                tag = TAGS.get(tag_id, tag_id)
-                metadata[tag] = value
+        exif_data = image._getexif()
+        if exif_data:
+            for tag, value in exif_data.items():
+                tag_name = ExifTags.TAGS.get(tag, tag)
+                if isinstance(value, bytes):
+                    metadata[tag_name] = str(value)
+                else:
+                    metadata[tag_name] = value
     except Exception as e:
-        metadata["error"] = f"Failed to extract EXIF: {str(e)}"
+        metadata['error'] = str(e)
     return metadata
 
-def extract_video_metadata(video_bytes):
-    metadata = {}
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
-            tmp.write(video_bytes)
-            tmp_path = tmp.name
+def get_video_metadata(file_path):
+    cap = cv2.VideoCapture(file_path)
+    duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / cap.get(cv2.CAP_PROP_FPS)
+    cap.release()
+    return {"duration_seconds": round(duration, 2)}
 
-        cap = cv2.VideoCapture(tmp_path)
-        if cap.isOpened():
-            frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            duration = frames / fps if fps else 0
-            metadata["frame_count"] = int(frames)
-            metadata["fps"] = round(fps, 2)
-            metadata["duration_seconds"] = round(duration, 2)
-        cap.release()
-        os.remove(tmp_path)
-    except Exception as e:
-        metadata["error"] = f"Failed to extract video metadata: {str(e)}"
-    return metadata
+def create_certificate(data_dict):
+    def clean(val):
+        if isinstance(val, bytes):
+            return str(val)
+        elif isinstance(val, (int, float, str)):
+            return val
+        elif isinstance(val, dict):
+            return {k: clean(v) for k, v in val.items()}
+        elif isinstance(val, (list, tuple)):
+            return [clean(v) for v in val]
+        else:
+            return str(val)
+    cleaned = {k: clean(v) for k, v in data_dict.items()}
+    json_bytes = json.dumps(cleaned, indent=2).encode('utf-8')
+    return json_bytes
 
-def compute_sha256(data):
-    return hashlib.sha256(data).hexdigest()
+with tab1:
+    uploaded_file = st.file_uploader("Upload an image or video file", type=["jpg", "jpeg", "png", "mp4", "mov"])
+    hash_type = st.radio("Select hash method", list(HASH_OPTIONS.keys()))
+    st.caption(HASH_OPTIONS[hash_type])
 
-def hash_image_pixels(image_bytes):
-    try:
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        pixel_array = np.array(img)
-        pixel_bytes = pixel_array.tobytes()
-        return hashlib.sha256(pixel_bytes).hexdigest()
-    except Exception as e:
-        return f"Error: {str(e)}"
+    if uploaded_file:
+        file_name = uploaded_file.name
+        file_type = uploaded_file.type
 
-# --- Streamlit App ---
-st.title("Blockchain Media Authenticator Prototype")
-tabs = st.tabs(["🔐 Authenticate File", "🔍 Verify File"])
+        metadata = {}
+        if file_type.startswith("image"):
+            image = Image.open(uploaded_file)
+            uploaded_file.seek(0)
+            st.image(uploaded_file, caption="Uploaded file preview", use_container_width=True)
+            metadata = get_exif_metadata(image)
+        else:
+            st.video(uploaded_file)
+            temp_file_path = os.path.join(".", "temp_video")
+            with open(temp_file_path, "wb") as f:
+                f.write(uploaded_file.read())
+            uploaded_file.seek(0)
+            metadata = get_video_metadata(temp_file_path)
+            os.remove(temp_file_path)
 
-# --- Tab 1: Authenticate ---
-with tabs[0]:
-    st.write("Upload an image or video to generate a SHA-256 hash and simulate recording to blockchain.")
-
-    uploaded_file = st.file_uploader("Upload your file (image or video)", type=["jpg", "jpeg", "png", "tif", "bmp", "mp4", "mov", "avi", "mkv"], key="auth")
-
-    if uploaded_file is not None:
-        file_bytes = uploaded_file.read()
-        st.subheader("📎 Uploaded Preview")
-        if uploaded_file.type.startswith("image"):
-            st.image(file_bytes, caption="Uploaded Image", use_container_width=True)
-        elif uploaded_file.type.startswith("video"):
-            st.video(file_bytes)
-
-        # Hashing Mode
-        st.subheader("⚙️ Hashing Mode")
-        st.markdown("""
-        - **File Hash**: A SHA-256 hash of the full digital file, including metadata. Sensitive to any file-level change.
-        - **Pixel Hash**: A hash of only the visual content (pixel data). Ideal when visual integrity matters.
-        """)
-
-        hash_mode = st.radio("Choose hashing method:", ["File", "Pixel Only"])
-
-        if hash_mode == "File":
-            st.subheader("🔐 File Hash")
-            hash_digest = compute_sha256(file_bytes)
-            st.code(hash_digest)
-        elif hash_mode == "Pixel Only":
-            st.subheader("🧬 Pixel Hash (Visual Content Only)")
-            pixel_hash = hash_image_pixels(file_bytes)
-            st.code(pixel_hash)
-
-        # Standard Metadata
-        metadata = {
-            "filename": uploaded_file.name,
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-            "uploader": "Researcher123@UniversityX"
-        }
-
-        st.subheader("📄 Metadata Snapshot")
+        st.subheader("📄 Full Metadata Snapshot")
         st.json(metadata)
 
-        extra_metadata = {}
-        if uploaded_file.type.startswith("image"):
-            extra_metadata = extract_exif_metadata(file_bytes)
-            st.subheader("🧾 EXIF Metadata (from image)")
-            st.json(extra_metadata)
-        elif uploaded_file.type.startswith("video"):
-            extra_metadata = extract_video_metadata(file_bytes)
-            st.subheader("🎞️ Video Metadata")
-            st.json(extra_metadata)
+        if st.button("Generate Hash"):
+            if file_type.startswith("image"):
+                if hash_type == "Pixel Only":
+                    hash_value = calculate_pixel_hash(image)
+                else:
+                    hash_value = calculate_file_hash(uploaded_file)
+            else:
+                hash_value = calculate_file_hash(uploaded_file)
 
-        blockchain_record = {
-            "tx_id": "0x" + compute_sha256(file_bytes)[:8] + "...",
-            "block_number": 12345678,
-            "recorded_at": metadata["timestamp"]
-        }
+            timestamp = datetime.utcnow().isoformat()
+            st.success("Hash generated successfully.")
+            st.code(hash_value, language="text")
 
-        st.subheader("⛓️ Blockchain Record (Simulated)")
-        st.json(blockchain_record)
+            cert_data = {
+                "file_name": file_name,
+                "hash_type": hash_type,
+                "hash": hash_value,
+                "timestamp": timestamp,
+                "metadata": metadata
+            }
 
-        st.success("✅ File hash recorded (simulated). A real app would now push this to Ethereum via a smart contract.")
-    else:
-        st.info("Please upload a file to begin.")
+            json_bytes = create_certificate(cert_data)
 
-# --- Tab 2: Verify ---
-with tabs[1]:
-    st.write("Upload a file and paste a known reference hash to verify authenticity.")
+            st.download_button(
+                label="📄 Download Certificate (JSON)",
+                data=json_bytes,
+                file_name=f"certificate_{file_name}_{timestamp[:10].replace('-', '')}.json",
+                mime="application/json"
+            )
 
-    verify_file = st.file_uploader("Upload file to verify", type=["jpg", "jpeg", "png", "tif", "bmp", "mp4", "mov", "avi", "mkv"], key="verify")
-    reference_hash = st.text_input("Enter reference SHA-256 hash")
+with tab2:
+    st.write("To verify a file, upload it and compare its hash to the original.")
+    uploaded_verification_file = st.file_uploader("Upload file to verify", key="verify")
+    verify_hash_type = st.radio("Hash method used during original authentication", list(HASH_OPTIONS.keys()), key="verify_type")
+    st.caption(HASH_OPTIONS[verify_hash_type])
+    expected_hash = st.text_input("Enter original hash value")
 
-    st.subheader("⚙️ Verification Mode")
-    st.markdown("""
-    - **File Hash**: Verifies against a hash of the original file. Detects any change to the file.
-    - **Pixel Hash**: Compares visual content only. Useful when file is re-saved but pixels are unchanged.
-    """)
-    verify_mode = st.radio("Choose verification method:", ["File", "Pixel Only"])
+    if uploaded_verification_file and expected_hash:
+        if st.button("Verify File"):
+            if uploaded_verification_file.type.startswith("image"):
+                image = Image.open(uploaded_verification_file)
+                result_hash = (
+                    calculate_pixel_hash(image)
+                    if verify_hash_type == "Pixel Only"
+                    else calculate_file_hash(uploaded_verification_file)
+                )
+            else:
+                result_hash = calculate_file_hash(uploaded_verification_file)
 
-    if verify_file is not None and reference_hash:
-        verify_bytes = verify_file.read()
-
-        if verify_mode == "File":
-            verify_hash = compute_sha256(verify_bytes)
-        elif verify_mode == "Pixel Only":
-            verify_hash = hash_image_pixels(verify_bytes)
-
-        st.subheader("🧪 Verification Result")
-        if verify_hash == reference_hash.strip():
-            st.success("✅ MATCH — File is authentic and unaltered.")
-        else:
-            st.error("❌ NO MATCH — The file does not match the provided hash.")
-
-        st.subheader("🔎 Calculated Hash")
-        st.code(verify_hash)
-    elif verify_file or reference_hash:
-        st.warning("Please upload a file AND enter a reference hash to verify.")
+            if result_hash == expected_hash.strip():
+                st.success("✅ Match! The file is authentic.")
+            else:
+                st.error("❌ No match. This file does not match the original hash.")
