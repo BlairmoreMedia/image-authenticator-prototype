@@ -81,7 +81,6 @@ with tab1:
         metadata = {}
         image = None
 
-        # Show preview and extract metadata immediately
         if file_type.startswith("image"):
             image = Image.open(uploaded_file)
             uploaded_file.seek(0)
@@ -97,9 +96,11 @@ with tab1:
             metadata = get_video_metadata(temp_file_path)
             os.remove(temp_file_path)
 
-        # Show extracted metadata before hash is generated
         st.subheader("📄 Full Metadata Snapshot")
         st.json(metadata)
+
+        if "cert_data" not in st.session_state:
+            st.session_state.cert_data = None
 
         if st.button("Generate Hash"):
             if file_type.startswith("image") and hash_type == "Pixel Only" and image:
@@ -109,10 +110,7 @@ with tab1:
 
             timestamp = datetime.utcnow().isoformat()
 
-            st.success("Hash generated successfully.")
-            st.code(hash_value, language="text")
-
-            cert_data = {
+            st.session_state.cert_data = {
                 "file_name": file_name,
                 "hash_type": hash_type,
                 "hash": hash_value,
@@ -120,12 +118,14 @@ with tab1:
                 "metadata": metadata
             }
 
-            json_bytes = create_certificate(cert_data)
-
+        if st.session_state.cert_data:
+            st.success("Hash generated successfully.")
+            st.code(st.session_state.cert_data["hash"], language="text")
+            json_bytes = create_certificate(st.session_state.cert_data)
             st.download_button(
                 label="📄 Download Certificate (JSON)",
                 data=json_bytes,
-                file_name=f"certificate_{file_name}_{timestamp[:10].replace('-', '')}.json",
+                file_name=f"certificate_{st.session_state.cert_data['file_name']}_{st.session_state.cert_data['timestamp'][:10].replace('-', '')}.json",
                 mime="application/json"
             )
 
